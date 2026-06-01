@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Portfolio Risk Analyzer</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+    <nav>
+        <span class="nav-logo">RiskLens</span>
+        <span class="nav-sub">Portfolio Risk Analyzer</span>
+    </nav>
+
+    <main>
+        <section class="intro">
+            <h1>Analyze Your Portfolio Risk</h1>
+            <p>Enter your stocks and investment amounts to get a full risk breakdown — Sharpe Ratio, Value at Risk, Volatility, and more.</p>
+        </section>
+
+        <section class="input-section">
+            <div class="input-header">
+                <h2>Your Portfolio</h2>
+                <button class="btn-add" onclick="addStock()">+ Add Stock</button>
+            </div>
+
+            <div id="stock-list">
+                <div class="stock-row" id="row-0">
+                    <div class="autocomplete-wrap">
+                        <input type="text" placeholder="Ticker (e.g. AAPL, RELIANCE.NS)" class="input-ticker" autocomplete="off" oninput="showSuggestions(this)" onblur="hideSuggestions(this)" />
+                        <div class="suggestions-box"></div>
+                    </div>
+                    <input type="number" placeholder="Amount invested (₹)" class="input-amount" />
+                    <button class="btn-remove" onclick="removeStock(0)">✕</button>
+                </div>
+                <div class="stock-row" id="row-1">
+                    <div class="autocomplete-wrap">
+                        <input type="text" placeholder="Ticker (e.g. TSLA, TCS.NS)" class="input-ticker" autocomplete="off" oninput="showSuggestions(this)" onblur="hideSuggestions(this)" />
+                        <div class="suggestions-box"></div>
+                    </div>
+                    <input type="number" placeholder="Amount invested (₹)" class="input-amount" />
+                    <button class="btn-remove" onclick="removeStock(1)">✕</button>
+                </div>
+            </div>
+
+            <div class="ticker-hint">
+                <strong>Indian stocks:</strong> Add .NS at the end — RELIANCE.NS, TCS.NS, INFY.NS, HDFCBANK.NS<br>
+                <strong>US stocks:</strong> Just the ticker — AAPL, TSLA, GOOGL, MSFT
+            </div>
+
+            <button class="btn-analyze" onclick="analyze()">Analyze Portfolio</button>
+        </section>
+
+        <div id="error-box" class="error-box" style="display:none;"></div>
+        <div id="loading" class="loading" style="display:none;">Fetching market data and running analysis...</div>
+
+        <section id="results" style="display:none;">
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-label">Sharpe Ratio</div>
+                    <div class="metric-value" id="sharpe"></div>
+                    <div class="metric-hint">Risk-adjusted return. Above 1 is good, above 2 is great.</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Value at Risk (95%)</div>
+                    <div class="metric-value" id="var"></div>
+                    <div class="metric-hint">Max expected daily loss 95% of the time.</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Lowest Volatility</div>
+                    <div class="metric-value" id="best-stock"></div>
+                    <div class="metric-hint">Most stable stock in your portfolio.</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Highest Volatility</div>
+                    <div class="metric-value" id="worst-stock"></div>
+                    <div class="metric-hint">Riskiest stock in your portfolio.</div>
+                </div>
+            </div>
+
+            <div class="chart-section">
+                <h2>Portfolio Cumulative Returns</h2>
+                <p class="chart-sub">How your portfolio would have performed over the past year.</p>
+                <div id="chart-returns"></div>
+            </div>
+
+            <div class="chart-section">
+                <h2>Volatility by Stock</h2>
+                <p class="chart-sub">Annualised volatility — higher means more price swings.</p>
+                <div id="chart-volatility"></div>
+            </div>
+
+            <div class="chart-section">
+                <h2>Correlation Heatmap</h2>
+                <p class="chart-sub">How stocks move relative to each other. Low correlation = better diversification.</p>
+                <div id="chart-correlation"></div>
+            </div>
+        </section>
+    </main>
+
+<script>
+const STOCKS = [
+  { ticker: "AAPL", name: "Apple Inc." },
+  { ticker: "TSLA", name: "Tesla Inc." },
+  { ticker: "MSFT", name: "Microsoft Corp." },
+  { ticker: "GOOGL", name: "Alphabet Inc." },
+  { ticker: "AMZN", name: "Amazon.com Inc." },
+  { ticker: "META", name: "Meta Platforms" },
+  { ticker: "NVDA", name: "NVIDIA Corp." },
+  { ticker: "NFLX", name: "Netflix Inc." },
+  { ticker: "AMD", name: "Advanced Micro Devices" },
+  { ticker: "JPM", name: "JPMorgan Chase" },
+  { ticker: "BAC", name: "Bank of America" },
+  { ticker: "GS", name: "Goldman Sachs" },
+  { ticker: "V", name: "Visa Inc." },
+  { ticker: "MA", name: "Mastercard Inc." },
+  { ticker: "PYPL", name: "PayPal Holdings" },
+  { ticker: "SQ", name: "Block Inc." },
+  { ticker: "COIN", name: "Coinbase Global" },
+  { ticker: "RELIANCE.NS", name: "Reliance Industries" },
+  { ticker: "TCS.NS", name: "Tata Consultancy Services" },
+  { ticker: "INFY.NS", name: "Infosys Ltd." },
+  { ticker: "HDFCBANK.NS", name: "HDFC Bank" },
+  { ticker: "ICICIBANK.NS", name: "ICICI Bank" },
+  { ticker: "SBIN.NS", name: "State Bank of India" },
+  { ticker: "WIPRO.NS", name: "Wipro Ltd." },
+  { ticker: "HINDUNILVR.NS", name: "Hindustan Unilever" },
+  { ticker: "ITC.NS", name: "ITC Ltd." },
+  { ticker: "BAJFINANCE.NS", name: "Bajaj Finance" },
+  { ticker: "AXISBANK.NS", name: "Axis Bank" },
+  { ticker: "KOTAKBANK.NS", name: "Kotak Mahindra Bank" },
+  { ticker: "TATAMOTORS.NS", name: "Tata Motors" },
+  { ticker: "TATASTEEL.NS", name: "Tata Steel" },
+  { ticker: "MARUTI.NS", name: "Maruti Suzuki" },
+  { ticker: "ZOMATO.NS", name: "Zomato Ltd." },
+  { ticker: "PAYTM.NS", name: "One97 Communications (Paytm)" },
+  { ticker: "NYKAA.NS", name: "FSN E-Commerce (Nykaa)" },
+];
+
+let rowCount = 2;
+
+function showSuggestions(input) {
+    const val = input.value.trim().toUpperCase();
+    const box = input.nextElementSibling;
+    if (!val) { box.innerHTML = ''; box.style.display = 'none'; return; }
+
+    const matches = STOCKS.filter(s =>
+        s.ticker.startsWith(val) || s.name.toUpperCase().includes(val)
+    ).slice(0, 6);
+
+    if (!matches.length) { box.innerHTML = ''; box.style.display = 'none'; return; }
+
+    box.innerHTML = matches.map(s => `
+        <div class="suggestion-item" onmousedown="selectSuggestion('${s.ticker}', this)">
+            <span class="suggestion-ticker">${s.ticker}</span>
+            <span class="suggestion-name">${s.name}</span>
+        </div>
+    `).join('');
+    box.style.display = 'block';
+}
+
+function selectSuggestion(ticker, el) {
+    const box = el.closest('.suggestions-box');
+    const input = box.previousElementSibling;
+    input.value = ticker;
+    box.innerHTML = '';
+    box.style.display = 'none';
+}
+
+function hideSuggestions(input) {
+    setTimeout(() => {
+        const box = input.nextElementSibling;
+        box.innerHTML = '';
+        box.style.display = 'none';
+    }, 150);
+}
+
+function addStock() {
+    const list = document.getElementById('stock-list');
+    const row = document.createElement('div');
+    row.className = 'stock-row';
+    row.id = `row-${rowCount}`;
+    row.innerHTML = `
+        <div class="autocomplete-wrap">
+            <input type="text" placeholder="Ticker" class="input-ticker" autocomplete="off" oninput="showSuggestions(this)" onblur="hideSuggestions(this)" />
+            <div class="suggestions-box"></div>
+        </div>
+        <input type="number" placeholder="Amount invested (₹)" class="input-amount" />
+        <button class="btn-remove" onclick="removeStock(${rowCount})">✕</button>
+    `;
+    list.appendChild(row);
+    rowCount++;
+}
+
+function removeStock(id) {
+    const row = document.getElementById(`row-${id}`);
+    const allRows = document.querySelectorAll('.stock-row');
+    if (allRows.length <= 2) { alert('You need at least 2 stocks.'); return; }
+    if (row) row.remove();
+}
+
+function analyze() {
+    const tickers = document.querySelectorAll('.input-ticker');
+    const amounts = document.querySelectorAll('.input-amount');
+    const stocks = [];
+
+    tickers.forEach((t, i) => {
+        const ticker = t.value.trim();
+        const amount = parseFloat(amounts[i].value);
+        if (ticker && !isNaN(amount) && amount > 0) {
+            stocks.push({ ticker, amount });
+        }
+    });
+
+    if (stocks.length < 2) {
+        showError('Please enter at least 2 stocks with valid amounts.');
+        return;
+    }
+
+    hideError();
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('results').style.display = 'none';
+
+    fetch('/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stocks })
+    })
+    .then(res => res.json())
+    .then(data => {
+        document.getElementById('loading').style.display = 'none';
+        if (data.error) { showError(data.error); return; }
+        renderResults(data);
+    })
+    .catch(() => {
+        document.getElementById('loading').style.display = 'none';
+        showError('Something went wrong. Please try again.');
+    });
+}
+
+function renderResults(data) {
+    document.getElementById('sharpe').textContent = data.sharpe_ratio;
+    document.getElementById('var').textContent = data.var_95 + '%';
+
+    const vol = data.volatility;
+    const sorted = Object.entries(vol).sort((a, b) => a[1] - b[1]);
+    document.getElementById('best-stock').textContent = `${sorted[0][0]} (${sorted[0][1]}%)`;
+    document.getElementById('worst-stock').textContent = `${sorted[sorted.length-1][0]} (${sorted[sorted.length-1][1]}%)`;
+
+    const returns = data.cumulative_returns;
+    Plotly.newPlot('chart-returns', [{
+        x: returns.dates, y: returns.values, type: 'scatter', mode: 'lines',
+        line: { color: '#2563eb', width: 2 }, fill: 'tozeroy', fillcolor: 'rgba(37,99,235,0.08)'
+    }], {
+        margin: { t: 10, r: 10, b: 40, l: 50 }, paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+        xaxis: { showgrid: false, color: '#888' },
+        yaxis: { showgrid: true, gridcolor: '#f0f0f0', color: '#888', ticksuffix: '%' },
+        hovermode: 'x unified'
+    }, { responsive: true, displayModeBar: false });
+
+    const volTickers = Object.keys(vol);
+    const volValues = Object.values(vol);
+    Plotly.newPlot('chart-volatility', [{
+        x: volTickers, y: volValues, type: 'bar', marker: { color: '#2563eb' }
+    }], {
+        margin: { t: 10, r: 10, b: 40, l: 50 }, paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+        xaxis: { showgrid: false, color: '#888' },
+        yaxis: { showgrid: true, gridcolor: '#f0f0f0', color: '#888', ticksuffix: '%' },
+    }, { responsive: true, displayModeBar: false });
+
+    const corr = data.correlation;
+    const corrTickers = Object.keys(corr);
+    const corrValues = corrTickers.map(t1 => corrTickers.map(t2 => corr[t1][t2]));
+    Plotly.newPlot('chart-correlation', [{
+        z: corrValues, x: corrTickers, y: corrTickers, type: 'heatmap',
+        colorscale: [[0, '#dbeafe'], [0.5, '#93c5fd'], [1, '#1d4ed8']],
+        zmin: -1, zmax: 1,
+        text: corrValues.map(row => row.map(v => v.toFixed(2))),
+        texttemplate: '%{text}', showscale: true
+    }], {
+        margin: { t: 10, r: 10, b: 40, l: 60 }, paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+    }, { responsive: true, displayModeBar: false });
+
+    document.getElementById('results').style.display = 'block';
+    document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+}
+
+function showError(msg) {
+    const box = document.getElementById('error-box');
+    box.textContent = msg;
+    box.style.display = 'block';
+}
+
+function hideError() {
+    document.getElementById('error-box').style.display = 'none';
+}
+</script>
+
+</body>
+</html>
